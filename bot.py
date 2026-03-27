@@ -3,8 +3,6 @@ from telebot import types
 import json
 import os
 import random
-import threading
-import time
 from datetime import datetime
 
 # ========== КОНФИГ ==========
@@ -18,14 +16,14 @@ SIGNATURES_FILE = "signatures.json"
 BANNED_USERS_FILE = "banned_users.json"
 POSTS_FILE = "posts.json"
 BLOCKED_SITES_FILE = "blocked_sites.json"
+SUPPORT_FILE = "support_tickets.json"
 SETTINGS_FILE = "settings.json"
 
 # ========== НАСТРОЙКИ ==========
 DEFAULT_SETTINGS = {
     'target_signatures': 1000,
     'blocking_started': False,
-    'blocking_announced': False,
-    'blocked_sites': []
+    'blocking_announced': False
 }
 
 def load_settings():
@@ -40,13 +38,13 @@ def save_settings(settings):
 
 # ========== ИНИЦИАЛИЗАЦИЯ ==========
 def init_files():
-    for f in [SIGNATURES_FILE, BANNED_USERS_FILE, POSTS_FILE, BLOCKED_SITES_FILE]:
+    for f in [SIGNATURES_FILE, BANNED_USERS_FILE, BLOCKED_SITES_FILE, SUPPORT_FILE]:
         if not os.path.exists(f):
             with open(f, 'w', encoding='utf-8') as file:
-                if f == POSTS_FILE:
-                    json.dump([], file, ensure_ascii=False)
-                else:
-                    json.dump({}, file, ensure_ascii=False)
+                json.dump({}, file, ensure_ascii=False)
+    if not os.path.exists(POSTS_FILE):
+        with open(POSTS_FILE, 'w', encoding='utf-8') as file:
+            json.dump([], file, ensure_ascii=False)
     if not os.path.exists(SETTINGS_FILE):
         save_settings(DEFAULT_SETTINGS)
 
@@ -74,8 +72,6 @@ def add_signature(user_id, username, first_name):
             'date': str(datetime.now())
         }
         save_data(SIGNATURES_FILE, sigs)
-        
-        # Проверяем достижение цели
         check_target_reached()
         return True
     return False
@@ -97,14 +93,11 @@ def check_target_reached():
     if current >= target and not settings.get('blocking_started', False):
         settings['blocking_started'] = True
         save_settings(settings)
-        
-        # Оповещаем всех пользователей
         notify_all_users_about_target()
         return True
     return False
 
 def notify_all_users_about_target():
-    """Оповещает всех подписавшихся о достижении цели"""
     sigs = get_signatures()
     text = """<b>© Роскомнадзор</b>
 
@@ -115,8 +108,6 @@ def notify_all_users_about_target():
 В соответствии с принятой программой цифрового надзора, <b>© Роскомнадзор</b> инициирует мероприятия по ограничению доступа к информационным ресурсам.
 
 <b>Блокировка начинается.</b>
-
-Для участия в управлении блокировками используйте новую кнопку в главном меню.
 
 —
 <i>Цифровой контроль. Законность. Порядок.</i>"""
@@ -185,13 +176,13 @@ def delete_post(post_id):
 
 # ========== БЛОКИРОВКИ ==========
 SITES_LIST = [
-    {'name': 'Telegram', 'emoji': '📱', 'blocked': False},
-    {'name': 'YouTube', 'emoji': '📺', 'blocked': False},
-    {'name': 'Instagram', 'emoji': '📸', 'blocked': False},
-    {'name': 'TikTok', 'emoji': '🎵', 'blocked': False},
-    {'name': 'Facebook', 'emoji': '📘', 'blocked': False},
-    {'name': 'WhatsApp', 'emoji': '💬', 'blocked': False},
-    {'name': 'X (Twitter)', 'emoji': '🐦', 'blocked': False},
+    {'name': 'Telegram', 'emoji': '📱'},
+    {'name': 'YouTube', 'emoji': '📺'},
+    {'name': 'Instagram', 'emoji': '📸'},
+    {'name': 'TikTok', 'emoji': '🎵'},
+    {'name': 'Facebook', 'emoji': '📘'},
+    {'name': 'WhatsApp', 'emoji': '💬'},
+    {'name': 'X (Twitter)', 'emoji': '🐦'},
 ]
 
 def get_blocked_sites():
@@ -212,23 +203,96 @@ def is_blocking_started():
     settings = load_settings()
     return settings.get('blocking_started', False)
 
+# ========== ПОДДЕРЖКА (СВЯЗЬ С РКН) ==========
+def get_tickets():
+    return load_data(SUPPORT_FILE)
+
+def create_ticket(user_id, username, first_name, message):
+    tickets = get_tickets()
+    uid = str(user_id)
+    
+    if uid not in tickets:
+        tickets[uid] = {
+            'user_id': user_id,
+            'username': username,
+            'first_name': first_name,
+            'tickets': []
+        }
+    
+    ticket_id = len(tickets[uid]['tickets']) + 1
+    
+    tickets[uid]['tickets'].append({
+        'id': ticket_id,
+        'message': message,
+        'date': str(datetime.now()),
+        'status': 'open',
+        'admin_response': None,
+        'response_date': None
+    })
+    
+    save_data(SUPPORT_FILE, tickets)
+    return ticket_id
+
+def add_response(user_id, ticket_id, response):
+    tickets = get_tickets()
+    uid = str(user_id)
+    
+    if uid in tickets:
+        for ticket in tickets[uid]['tickets']:
+            if ticket['id'] == ticket_id:
+                ticket['admin_response'] = response
+                ticket['response_date'] = str(datetime.now())
+                ticket['status'] = 'closed'
+                save_data(SUPPORT_FILE, tickets)
+                return True
+    return False
+
+def get_user_tickets(user_id):
+    tickets = get_tickets()
+    uid = str(user_id)
+    if uid in tickets:
+        return tickets[uid]['tickets']
+    return []
+
 # ========== КЛАВИАТУРЫ ==========
 def main_keyboard():
     kb = types.InlineKeyboardMarkup(row_width=2)
     
-    # Основные кнопки
     kb.add(
         types.InlineKeyboardButton("📝 Подписать петицию", callback_data="sign"),
         types.InlineKeyboardButton("📢 Лента обращений", callback_data="feed"),
         types.InlineKeyboardButton("✍️ Написать обращение", callback_data="write"),
         types.InlineKeyboardButton("⚠️ Проверить статус", callback_data="status"),
-        types.InlineKeyboardButton("📊 Статистика", callback_data="stats")
+        types.InlineKeyboardButton("📊 Статистика", callback_data="stats"),
+        types.InlineKeyboardButton("📞 Связь с РКН", callback_data="support")
     )
     
-    # Кнопка блокировки (появляется после 1000 подписей)
     if is_blocking_started():
         kb.add(types.InlineKeyboardButton("🔒 Начать блокировку", callback_data="blocking_menu"))
     
+    return kb
+
+def support_keyboard():
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    kb.add(
+        types.InlineKeyboardButton("📝 Новое обращение", callback_data="new_ticket"),
+        types.InlineKeyboardButton("📋 Мои обращения", callback_data="my_tickets"),
+        types.InlineKeyboardButton("◀️ Назад", callback_data="back_to_main")
+    )
+    return kb
+
+def tickets_list_keyboard(user_id):
+    tickets = get_user_tickets(user_id)
+    kb = types.InlineKeyboardMarkup(row_width=1)
+    
+    for ticket in tickets[-5:]:
+        status_emoji = "✅" if ticket['status'] == 'closed' else "🟡"
+        kb.add(types.InlineKeyboardButton(
+            f"{status_emoji} Обращение #{ticket['id']} ({ticket['date'][:10]})",
+            callback_data=f"ticket_{ticket['id']}"
+        ))
+    
+    kb.add(types.InlineKeyboardButton("◀️ Назад", callback_data="support"))
     return kb
 
 def blocking_keyboard():
@@ -259,6 +323,7 @@ def admin_keyboard():
         types.InlineKeyboardButton("📊 Статистика", callback_data="admin_stats"),
         types.InlineKeyboardButton("📢 Рассылка", callback_data="admin_broadcast"),
         types.InlineKeyboardButton("🎯 Сбросить цель", callback_data="admin_reset_target"),
+        types.InlineKeyboardButton("📞 Ответить на обращение", callback_data="admin_support"),
         types.InlineKeyboardButton("◀️ Назад", callback_data="back_to_main")
     )
     return kb
@@ -281,6 +346,7 @@ START_TEXT = """
 ✍️ Написать обращение — направить сообщение в адрес © РКН
 ⚠️ Проверить статус — информация о наличии ограничений
 📊 Статистика — актуальные данные о подписях
+📞 Связь с РКН — задать вопрос или оставить обращение
 
 <i>Цифровой контроль. Законность. Порядок.</i>
 """
@@ -308,8 +374,7 @@ def start_cmd(message):
         bot.send_message(user_id, "🚫 <b>Доступ ограничен</b>\n\nВаш аккаунт внесен в список лиц, в отношении которых применяются меры цифрового контроля.", parse_mode='HTML')
         return
     
-    text = START_TEXT
-    bot.send_message(user_id, text, parse_mode='HTML', reply_markup=main_keyboard())
+    bot.send_message(user_id, START_TEXT, parse_mode='HTML', reply_markup=main_keyboard())
 
 @bot.message_handler(commands=['help'])
 def help_cmd(message):
@@ -330,13 +395,6 @@ def help_cmd(message):
 /post [текст] — оставить обращение
 /status — проверить статус
 /stats — статистика подписей
-
-<b>Кнопки управления:</b>
-📝 Подписать петицию — выражение поддержки
-📢 Лента — ознакомление с обращениями
-✍️ Написать — создание обращения
-⚠️ Статус — проверка ограничений
-📊 Статистика — данные о подписях
 
 <i>© Роскомнадзор. Все права защищены.</i>
 """
@@ -365,7 +423,7 @@ def sign_cmd(message):
 📝 Всего подписей: <code>{count}</code>
 🎯 До целевого показателя: <code>{remaining}</code>
 
-<i>При достижении 1000 подписей будут инициированы мероприятия по ограничению доступа к информационным ресурсам.</i>
+<i>При достижении 1000 подписей будут инициированы мероприятия по ограничению доступа.</i>
 """
         bot.send_message(user_id, text, parse_mode='HTML', reply_markup=back_keyboard())
     else:
@@ -376,37 +434,14 @@ def status_cmd(message):
     user_id = message.from_user.id
     
     if is_banned(user_id):
-        text = """
-🚫 <b>СТАТУС: ОГРАНИЧЕН</b>
-
-В отношении вашего аккаунта применяются меры цифрового контроля.
-
-<b>Основание:</b> Нарушение правил использования информационных ресурсов.
-
-<i>Для получения дополнительной информации обратитесь в службу поддержки.</i>
-"""
+        text = "🚫 <b>СТАТУС: ОГРАНИЧЕН</b>\n\nВ отношении вашего аккаунта применяются меры цифрового контроля."
         bot.send_message(user_id, text, parse_mode='HTML', reply_markup=back_keyboard())
     else:
         sigs = get_signatures()
         if str(user_id) in sigs:
-            text = """
-✅ <b>СТАТУС: НОРМАЛЕН</b>
-
-Ваш аккаунт не имеет ограничений.
-
-<b>Подпись в реестре:</b> присутствует
-<b>Дата подписания:</b> {date}
-
-<i>Благодарим за поддержку инициатив © РКН.</i>
-""".format(date=sigs[str(user_id)]['date'][:19])
+            text = f"✅ <b>СТАТУС: НОРМАЛЕН</b>\n\nПодпись в реестре: {sigs[str(user_id)]['date'][:19]}"
         else:
-            text = """
-⚠️ <b>СТАТУС: ПОД НАБЛЮДЕНИЕМ</b>
-
-Ваш аккаунт не имеет ограничений, однако не зарегистрирован в реестре поддержавших инициативу.
-
-<b>Рекомендация:</b> подписать петицию для перехода в статус «НОРМАЛЕН».
-"""
+            text = "⚠️ <b>СТАТУС: ПОД НАБЛЮДЕНИЕМ</b>\n\nРекомендуется подписать петицию."
         bot.send_message(user_id, text, parse_mode='HTML', reply_markup=back_keyboard())
 
 @bot.message_handler(commands=['stats'])
@@ -422,9 +457,9 @@ def stats_cmd(message):
     blocking_started = is_blocking_started()
     
     if blocking_started:
-        blocking_status = "🔴 <b>АКТИВИРОВАНА</b> — мероприятия по ограничению доступа проводятся"
+        blocking_status = "🔴 <b>АКТИВИРОВАНА</b> — мероприятия проводятся"
     else:
-        blocking_status = "⚪ <b>ОЖИДАНИЕ</b> — для активации требуется <code>{}</code> подписей".format(remaining)
+        blocking_status = f"⚪ <b>ОЖИДАНИЕ</b> — осталось {remaining} подписей"
     
     text = STATS_TEXT.format(
         signatures=count,
@@ -443,13 +478,7 @@ def feed_cmd(message):
     
     posts = get_posts()
     if not posts:
-        text = """
-📢 <b>ЛЕНТА ОБРАЩЕНИЙ</b>
-
-На данный момент обращения граждан отсутствуют.
-
-<i>Вы можете стать первым, использовав команду /post [текст]</i>
-"""
+        text = "📢 <b>ЛЕНТА ОБРАЩЕНИЙ</b>\n\nОбращения отсутствуют."
         bot.send_message(user_id, text, parse_mode='HTML', reply_markup=back_keyboard())
         return
     
@@ -459,7 +488,7 @@ def feed_cmd(message):
         kb.add(types.InlineKeyboardButton(f"❤️ {post['likes']} | {name}", callback_data=f"view_{post['id']}"))
     kb.add(types.InlineKeyboardButton("◀️ Назад", callback_data="back_to_main"))
     
-    bot.send_message(user_id, "📢 <b>ЛЕНТА ОБРАЩЕНИЙ</b>\n\nВыберите обращение для просмотра:", parse_mode='HTML', reply_markup=kb)
+    bot.send_message(user_id, "📢 <b>ЛЕНТА ОБРАЩЕНИЙ</b>\n\nВыберите обращение:", parse_mode='HTML', reply_markup=kb)
 
 @bot.message_handler(commands=['post'])
 def post_cmd(message):
@@ -474,20 +503,18 @@ def post_cmd(message):
         text = """
 ✍️ <b>НАПИСАНИЕ ОБРАЩЕНИЯ</b>
 
-Для направления обращения используйте формат:
+Используйте формат:
 <code>/post Текст обращения</code>
 
 <b>Требования:</b>
-• Максимальная длина: 500 символов
-• Запрещены: нецензурная лексика, призывы к нарушению законодательства
-
-<i>Все обращения регистрируются и подлежат рассмотрению.</i>
+• Максимум 500 символов
+• Запрещена нецензурная лексика
 """
         bot.send_message(user_id, text, parse_mode='HTML', reply_markup=back_keyboard())
         return
     
     if len(text) > 500:
-        bot.send_message(user_id, "❌ <b>Ошибка</b>\n\nПревышена максимальная длина обращения (500 символов).", parse_mode='HTML')
+        bot.send_message(user_id, "❌ <b>Ошибка</b>\n\nПревышена максимальная длина (500 символов).", parse_mode='HTML')
         return
     
     username = message.from_user.username or message.from_user.first_name
@@ -495,30 +522,33 @@ def post_cmd(message):
     
     add_post(user_id, username, first_name, text)
     
-    text = """
+    text = f"""
 ✅ <b>ОБРАЩЕНИЕ ПРИНЯТО</b>
 
-Ваше обращение зарегистрировано и направлено на рассмотрение.
+Ваше обращение зарегистрировано.
 
-<b>Номер регистрации:</b> #{id}
+<b>Номер регистрации:</b> #{len(get_posts())}
 
 <i>© Роскомнадзор. Все обращения подлежат обязательному рассмотрению.</i>
-""".format(id=len(get_posts()))
+"""
     bot.send_message(user_id, text, parse_mode='HTML', reply_markup=back_keyboard())
 
 @bot.message_handler(commands=['admin'])
 def admin_cmd(message):
     if message.from_user.id != ADMIN_ID:
-        bot.reply_to(message, "❌ <b>Ошибка авторизации</b>\n\nНедостаточно прав для выполнения данной операции.", parse_mode='HTML')
+        bot.reply_to(message, "❌ <b>Ошибка авторизации</b>\n\nНедостаточно прав.", parse_mode='HTML')
         return
     
-    text = """
-🔧 <b>ПАНЕЛЬ УПРАВЛЕНИЯ</b>
-<i>© Роскомнадзор — Административный интерфейс</i>
-
-Выберите действие:
-"""
+    text = "🔧 <b>ПАНЕЛЬ УПРАВЛЕНИЯ</b>\n<i>© Роскомнадзор — Административный интерфейс</i>\n\nВыберите действие:"
     bot.send_message(message.chat.id, text, parse_mode='HTML', reply_markup=admin_keyboard())
+
+# ========== ОБРАБОТКА СООБЩЕНИЙ ДЛЯ ПОДДЕРЖКИ ==========
+@bot.message_handler(func=lambda message: message.from_user.id != ADMIN_ID and not message.text.startswith('/'))
+def handle_support_message(message):
+    """Если пользователь в режиме ожидания ответа на обращение"""
+    # Проверяем, есть ли у пользователя ожидающий режим
+    # Это временное решение, в реальном боте лучше использовать state machine
+    pass
 
 # ========== КОЛБЭКИ ==========
 @bot.callback_query_handler(func=lambda call: True)
@@ -527,7 +557,9 @@ def handle_callback(call):
     data = call.data
     
     # Проверка бана
-    if data not in ["admin_ban", "admin_unban", "admin_signatures", "admin_delete_post", "admin_stats", "admin_broadcast", "admin_reset_target", "back_to_main", "blocking_menu"]:
+    if data not in ["admin_ban", "admin_unban", "admin_signatures", "admin_delete_post", 
+                    "admin_stats", "admin_broadcast", "admin_reset_target", "admin_support",
+                    "back_to_main", "blocking_menu", "support", "new_ticket", "my_tickets"]:
         if is_banned(user_id):
             bot.answer_callback_query(call.id, "🚫 Доступ ограничен", show_alert=True)
             return
@@ -656,7 +688,7 @@ def handle_callback(call):
 <b>Автор:</b> {name}
 <b>Дата:</b> {post['date'][:19]}
 
-<b>Текст обращения:</b>
+<b>Текст:</b>
 {post['text']}
 
 <b>Поддержка:</b> ❤️ {post['likes']}
@@ -674,7 +706,6 @@ def handle_callback(call):
         post_id = int(data[5:])
         if like_post(post_id, user_id):
             bot.answer_callback_query(call.id, "✅ Поддержка учтена")
-            # Обновляем отображение
             posts = get_posts()
             post = None
             for p in posts:
@@ -689,7 +720,7 @@ def handle_callback(call):
 <b>Автор:</b> {name}
 <b>Дата:</b> {post['date'][:19]}
 
-<b>Текст обращения:</b>
+<b>Текст:</b>
 {post['text']}
 
 <b>Поддержка:</b> ❤️ {post['likes']}
@@ -702,7 +733,95 @@ def handle_callback(call):
             bot.answer_callback_query(call.id, "Вы уже поддержали это обращение", show_alert=True)
         return
     
-    # Меню блокировок
+    # ========== ПОДДЕРЖКА (СВЯЗЬ С РКН) ==========
+    if data == "support":
+        if is_banned(user_id):
+            bot.answer_callback_query(call.id, "🚫 Доступ ограничен", show_alert=True)
+            return
+        
+        text = """
+📞 <b>СВЯЗЬ С РКН</b>
+
+Вы можете написать обращение в службу поддержки © Роскомнадзор.
+
+<b>Доступные действия:</b>
+• <b>Новое обращение</b> — задать вопрос или оставить заявление
+• <b>Мои обращения</b> — просмотреть историю и ответы
+
+<i>Среднее время ответа: до 24 часов.</i>
+"""
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode='HTML', reply_markup=support_keyboard())
+        bot.answer_callback_query(call.id)
+        return
+    
+    if data == "new_ticket":
+        if is_banned(user_id):
+            bot.answer_callback_query(call.id, "🚫 Доступ ограничен", show_alert=True)
+            return
+        
+        bot.edit_message_text(
+            "📝 <b>НОВОЕ ОБРАЩЕНИЕ</b>\n\nОтправьте текст вашего обращения одним сообщением.\n\nМаксимум 500 символов.\n\n<i>Нажмите «Отмена», чтобы вернуться назад.</i>",
+            call.message.chat.id, call.message.message_id, parse_mode='HTML', reply_markup=back_keyboard()
+        )
+        bot.register_next_step_handler(call.message, process_new_ticket, user_id)
+        bot.answer_callback_query(call.id)
+        return
+    
+    if data == "my_tickets":
+        if is_banned(user_id):
+            bot.answer_callback_query(call.id, "🚫 Доступ ограничен", show_alert=True)
+            return
+        
+        tickets = get_user_tickets(user_id)
+        if not tickets:
+            text = "📋 <b>МОИ ОБРАЩЕНИЯ</b>\n\nУ вас нет обращений в службу поддержки.\n\nИспользуйте «Новое обращение», чтобы задать вопрос."
+            bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode='HTML', reply_markup=back_keyboard())
+        else:
+            kb = tickets_list_keyboard(user_id)
+            bot.edit_message_text("📋 <b>МОИ ОБРАЩЕНИЯ</b>\n\nВыберите обращение для просмотра:", call.message.chat.id, call.message.message_id, parse_mode='HTML', reply_markup=kb)
+        bot.answer_callback_query(call.id)
+        return
+    
+    if data.startswith("ticket_"):
+        ticket_id = int(data[7:])
+        tickets = get_user_tickets(user_id)
+        ticket = None
+        for t in tickets:
+            if t['id'] == ticket_id:
+                ticket = t
+                break
+        
+        if ticket:
+            status_text = "✅ <b>ЗАКРЫТО</b>" if ticket['status'] == 'closed' else "🟡 <b>ОЖИДАЕТ ОТВЕТА</b>"
+            
+            text = f"""
+📋 <b>ОБРАЩЕНИЕ #{ticket['id']}</b>
+
+<b>Дата:</b> {ticket['date'][:19]}
+<b>Статус:</b> {status_text}
+
+<b>Ваше сообщение:</b>
+{ticket['message']}
+"""
+            if ticket['admin_response']:
+                text += f"""
+
+<b>Ответ © РКН:</b>
+{ticket['admin_response']}
+
+<b>Дата ответа:</b> {ticket['response_date'][:19]}
+"""
+            else:
+                text += "\n\n<i>Ответ еще не поступил. Пожалуйста, ожидайте.</i>"
+            
+            kb = types.InlineKeyboardMarkup()
+            kb.add(types.InlineKeyboardButton("◀️ Назад", callback_data="my_tickets"))
+            bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode='HTML', reply_markup=kb)
+        else:
+            bot.answer_callback_query(call.id, "Обращение не найдено")
+        return
+    
+    # ========== БЛОКИРОВКИ ==========
     if data == "blocking_menu":
         if not is_blocking_started():
             bot.answer_callback_query(call.id, "Программа блокировок еще не активирована", show_alert=True)
@@ -710,17 +829,14 @@ def handle_callback(call):
         
         text = """
 🔒 <b>ПРОГРАММА БЛОКИРОВОК</b>
-<i>© Роскомнадзор — Управление доступом к информационным ресурсам</i>
+<i>© Роскомнадзор — Управление доступом</i>
 
-Выберите ресурс для применения мер ограничения доступа.
-
-<b>Статус блокировок:</b>
+Выберите ресурс для применения мер ограничения.
 """
         bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode='HTML', reply_markup=blocking_keyboard())
         bot.answer_callback_query(call.id)
         return
     
-    # Блокировка сайта
     if data.startswith("block_"):
         site_name = data[6:]
         
@@ -728,11 +844,9 @@ def handle_callback(call):
             text = f"""
 ✅ <b>МЕРЫ ПРИНЯТЫ</b>
 
-Доступ к информационному ресурсу <b>{site_name}</b> ограничен на основании общественной поддержки, выраженной в рамках сбора подписей.
+Доступ к ресурсу <b>{site_name}</b> ограничен на основании общественной поддержки.
 
-<b>Основание:</b> Достижение целевого показателя в 1000 подписей граждан.
-
-<i>© Роскомнадзор. Цифровой контроль. Законность. Порядок.</i>
+<i>© Роскомнадзор. Цифровой контроль.</i>
 """
             bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode='HTML', reply_markup=back_keyboard())
         else:
@@ -811,17 +925,18 @@ def handle_callback(call):
         posts_count = len(get_posts())
         banned_count = len(load_data(BANNED_USERS_FILE))
         blocked_count = len(get_blocked_sites())
+        tickets_count = sum(len(t['tickets']) for t in get_tickets().values())
         settings = load_settings()
         
         text = f"""
 📊 <b>СТАТИСТИКА СИСТЕМЫ</b>
-<i>© Роскомнадзор — Сводный отчет</i>
 
 <b>Подписи в реестре:</b> {count}
 <b>Целевой показатель:</b> {settings.get('target_signatures', 1000)}
 <b>Программа блокировок:</b> {'АКТИВНА' if settings.get('blocking_started') else 'ОЖИДАНИЕ'}
 <b>Заблокировано ресурсов:</b> {blocked_count}
 <b>Обращений граждан:</b> {posts_count}
+<b>Обращений в поддержку:</b> {tickets_count}
 <b>Ограниченных аккаунтов:</b> {banned_count}
 
 <i>Данные актуальны на {datetime.now().strftime('%d.%m.%Y %H:%M')}</i>
@@ -851,6 +966,56 @@ def handle_callback(call):
         bot.answer_callback_query(call.id)
         return
     
+    if data == "admin_support":
+        if user_id != ADMIN_ID:
+            bot.answer_callback_query(call.id, "❌ Недостаточно прав")
+            return
+        
+        tickets = get_tickets()
+        open_tickets = []
+        
+        for uid, data in tickets.items():
+            for ticket in data['tickets']:
+                if ticket['status'] == 'open':
+                    open_tickets.append((uid, data['first_name'], data['username'], ticket))
+        
+        if not open_tickets:
+            bot.send_message(ADMIN_ID, "📞 Нет открытых обращений в поддержку.")
+        else:
+            kb = types.InlineKeyboardMarkup(row_width=1)
+            for uid, name, username, ticket in open_tickets[:10]:
+                kb.add(types.InlineKeyboardButton(
+                    f"#{ticket['id']} | {name} (@{username})",
+                    callback_data=f"reply_ticket_{uid}_{ticket['id']}"
+                ))
+            bot.send_message(ADMIN_ID, "📞 <b>ОТКРЫТЫЕ ОБРАЩЕНИЯ</b>\n\nВыберите для ответа:", parse_mode='HTML', reply_markup=kb)
+        bot.answer_callback_query(call.id)
+        return
+    
+    if data.startswith("reply_ticket_"):
+        if user_id != ADMIN_ID:
+            bot.answer_callback_query(call.id, "❌ Недостаточно прав")
+            return
+        
+        parts = data.split("_")
+        target_user_id = int(parts[2])
+        ticket_id = int(parts[3])
+        
+        tickets = get_tickets()
+        ticket = None
+        for t in tickets.get(str(target_user_id), {}).get('tickets', []):
+            if t['id'] == ticket_id:
+                ticket = t
+                break
+        
+        if ticket:
+            bot.send_message(ADMIN_ID, f"📝 <b>Ответ на обращение #{ticket_id}</b>\n\n<b>Пользователь:</b> {ticket['message'][:100]}...\n\nВведите текст ответа:", parse_mode='HTML')
+            bot.register_next_step_handler(call.message, process_admin_response, target_user_id, ticket_id)
+        else:
+            bot.send_message(ADMIN_ID, "❌ Обращение не найдено")
+        bot.answer_callback_query(call.id)
+        return
+    
     if data == "admin_panel":
         if user_id != ADMIN_ID:
             bot.answer_callback_query(call.id, "❌ Недостаточно прав")
@@ -860,6 +1025,30 @@ def handle_callback(call):
         bot.answer_callback_query(call.id)
         return
 
+# ========== ШАГИ ДЛЯ ПОЛЬЗОВАТЕЛЯ ==========
+def process_new_ticket(message, user_id):
+    """Обработка нового обращения от пользователя"""
+    if message.text == "◀️ Назад" or message.text == "/start":
+        start_cmd(message)
+        return
+    
+    text = message.text.strip()
+    if len(text) > 500:
+        bot.send_message(user_id, "❌ Слишком длинное сообщение. Максимум 500 символов.")
+        bot.send_message(user_id, "📝 Отправьте текст обращения заново:")
+        bot.register_next_step_handler(message, process_new_ticket, user_id)
+        return
+    
+    username = message.from_user.username or message.from_user.first_name
+    first_name = message.from_user.first_name
+    
+    ticket_id = create_ticket(user_id, username, first_name, text)
+    
+    bot.send_message(user_id, f"✅ <b>Обращение #{ticket_id} принято!</b>\n\nСпециалист © РКН ответит в ближайшее время.\n\nВы можете отслеживать статус в разделе «Мои обращения».", parse_mode='HTML')
+    
+    # Уведомляем админа
+    bot.send_message(ADMIN_ID, f"📞 <b>НОВОЕ ОБРАЩЕНИЕ #{ticket_id}</b>\n\n<b>От:</b> {first_name} (@{username}) ID: {user_id}\n<b>Текст:</b>\n{text[:200]}", parse_mode='HTML')
+
 # ========== ШАГИ ДЛЯ АДМИНА ==========
 def ban_user_step(message):
     try:
@@ -867,7 +1056,7 @@ def ban_user_step(message):
         ban_user(user_id)
         bot.send_message(ADMIN_ID, f"✅ Пользователь {user_id} внесен в список ограниченных.")
         try:
-            bot.send_message(user_id, "🚫 <b>УВЕДОМЛЕНИЕ © РКН</b>\n\nВаш доступ к информационным ресурсам ограничен.", parse_mode='HTML')
+            bot.send_message(user_id, "🚫 <b>УВЕДОМЛЕНИЕ © РКН</b>\n\nВаш доступ ограничен.", parse_mode='HTML')
         except:
             pass
     except:
@@ -879,7 +1068,7 @@ def unban_user_step(message):
         unban_user(user_id)
         bot.send_message(ADMIN_ID, f"✅ Пользователь {user_id} исключен из списка ограниченных.")
         try:
-            bot.send_message(user_id, "✅ <b>УВЕДОМЛЕНИЕ © РКН</b>\n\nОграничения доступа сняты.", parse_mode='HTML')
+            bot.send_message(user_id, "✅ <b>УВЕДОМЛЕНИЕ © РКН</b>\n\nОграничения сняты.", parse_mode='HTML')
         except:
             pass
     except:
@@ -898,6 +1087,19 @@ def broadcast_step(message):
             pass
     
     bot.send_message(ADMIN_ID, f"✅ Рассылка завершена. Получателей: {count}")
+
+def process_admin_response(message, target_user_id, ticket_id):
+    """Обработка ответа админа на обращение"""
+    response = message.text.strip()
+    
+    if add_response(target_user_id, ticket_id, response):
+        bot.send_message(ADMIN_ID, f"✅ Ответ на обращение #{ticket_id} отправлен.")
+        try:
+            bot.send_message(target_user_id, f"📞 <b>ОТВЕТ © РКН</b>\n\n<b>Обращение #{ticket_id}</b>\n\n{response}\n\n<i>Статус: закрыто</i>", parse_mode='HTML')
+        except:
+            pass
+    else:
+        bot.send_message(ADMIN_ID, f"❌ Ошибка при отправке ответа на обращение #{ticket_id}.")
 
 # ========== ЗАПУСК ==========
 if __name__ == "__main__":
