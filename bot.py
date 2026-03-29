@@ -1,45 +1,62 @@
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+import random
+import numpy
+import telegram
+import telegram.ext
 
-# Твой токен
+from telegram import Update
+from telegram.ext import ApplicationBuilder
+from telegram.ext import CommandHandler
+from telegram.ext import MessageHandler
+from telegram.ext import ContextTypes
+from telegram.ext import filters
+
+# Токен бота
 TOKEN = "7606324631:AAEAzQlveWxP9t4Xymh8gnE3c-B45-sEoNE"
 
-# Промт HoFiLiOn
-PROMPT = """
-Ты нейронка, которая имитирует стиль общения пользователя HoFiLiOn.
-Пиши естественно, живо, без цензуры, с эмоциями и сленгом. 
-Пиши от первого лица. Пример: 
-Хофилион: ебанный рот, ну и что за нахуй тут происходит…
-Хофилион: ааа, вот оно че, бля, даже не ожидал такого…
-"""
+# Мини-нейросеть: учится на твоих примерах HoFiLiOn
+class HoFiLiOnNN:
+    def __init__(self):
+        # Примитивная “память” ответов
+        self.examples = [
+            "ебаный рот, ну и что за нахуй тут происходит…",
+            "ааа, вот оно че, бля, даже не ожидал такого…",
+            "ну ладно, посмотрим что дальше, хз че там будет",
+            "бля, реально жестко, хз как так вышло 😅",
+            "ахах, ёпт, это прям огонь 🔥"
+        ]
 
-# Функция генерации текста (на данном этапе — простая имитация)
-def generate_hofilion_response(user_text: str) -> str:
-    # Здесь можно подключить реальный API нейросети
-    # Сейчас делаем примитивный генератор
-    import random
-    responses = [
-        "ёпт, ну ты это… чёт жестко получилось 😅",
-        "бля, не ожидал такого, ну ладно...",
-        "ахаха, хз че тут сказать, реально",
-        "ебаный рот, это прям огонь 🔥",
-        "ну посмотрим что дальше, хз че будет"
-    ]
-    return random.choice(responses)
+    # "Обучение" — просто добавляем примеры
+    def train(self, text):
+        self.examples.append(text)
+
+    # Генерация ответа: случайная комбинация слов из примеров
+    def generate(self, prompt=""):
+        # Можно добавить простое смешение слов
+        base = random.choice(self.examples)
+        words = base.split()
+        random.shuffle(words)
+        # Частично сохраняем структуру
+        cut = random.randint(int(len(words)/2), len(words))
+        return " ".join(words[:cut])
+
+# Создаём нейросеть
+nn = HoFiLiOnNN()
+
+# Обработчик команды /start
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Привет! Я HoFiLiOn Bot. Пиши что-нибудь, и я отвечу как HoFiLiOn 😎")
 
 # Обработчик сообщений
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
-    response = generate_hofilion_response(user_text)
+    # "Обучаем" сеть на твоём сообщении
+    nn.train(user_text)
+    # Генерируем ответ
+    response = nn.generate(user_text)
     await update.message.reply_text(response)
 
-# Команда /start
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Привет! Я HoFiLiOn Bot. Пиши что-нибудь, и я отвечу как HoFiLiOn 😎")
-
-# Создаём и запускаем бота
+# Создаём приложение и добавляем обработчики
 app = ApplicationBuilder().token(TOKEN).build()
-
 app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
