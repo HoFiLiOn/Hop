@@ -10,107 +10,160 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 # ========== НАСТРОЙКИ ==========
 TOKEN = "8376850903:AAEvWNLCJTA2U_Yblx271ov5JYzGsxA5IJg"
 
-# ========== ОБУЧАЕМАЯ МОДЕЛЬ (Цепь Маркова) ==========
+# ========== ИМПОРТ QWEN (локальная нейросеть) ==========
+# Установка: pip install transformers torch accelerate
+try:
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    import torch
+    QWEN_AVAILABLE = True
+except ImportError:
+    print("⚠️ Установи transformers: pip install transformers torch accelerate")
+    QWEN_AVAILABLE = False
+
+# ========== ЗАГРУЗКА QWEN ==========
+class QwenChat:
+    def __init__(self):
+        self.model = None
+        self.tokenizer = None
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        
+    def load_model(self):
+        """Загружаем Qwen2.5-0.5B (лёгкая версия)"""
+        if not QWEN_AVAILABLE:
+            return False
+        
+        try:
+            print(f"🚀 Загружаю Qwen на {self.device}...")
+            model_name = "Qwen/Qwen2.5-0.5B-Instruct"
+            
+            self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                device_map="auto",
+                trust_remote_code=True
+            )
+            print("✅ Qwen загружена!")
+            return True
+        except Exception as e:
+            print(f"❌ Ошибка загрузки Qwen: {e}")
+            return False
+    
+    def generate_hofilion_style(self, user_input="", max_length=150):
+        """Генерирует ответ в стиле HoFiLiOn"""
+        if self.model is None:
+            return self._fallback_response(user_input)
+        
+        # Промт для стиля HoFiLiOn
+        system_prompt = """Ты HoFiLiOn. Пиши как он: с матом, сленгом, эмоционально. 
+Короткие и длинные фразы. Эмодзи. Без цензуры. От первого лица.
+Примеры:
+- "ебаный рот, ну и что за нахуй тут происходит"
+- "ааа, вот оно че, бля, даже не ожидал такого"
+- "ну ладно, посмотрим что дальше, хз че там будет"
+- "короче, пиздец полный, я в ахуе"
+"""
+        
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_input if user_input else "ну че, как дела?"}
+        ]
+        
+        text = self.tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True
+        )
+        
+        inputs = self.tokenizer([text], return_tensors="pt").to(self.device)
+        
+        with torch.no_grad():
+            outputs = self.model.generate(
+                **inputs,
+                max_new_tokens=max_length,
+                temperature=0.9,
+                top_p=0.95,
+                do_sample=True,
+                pad_token_id=self.tokenizer.eos_token_id
+            )
+        
+        response = self.tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
+        
+        # Чистим ответ
+        response = response.strip()
+        if not response:
+            response = self._fallback_response(user_input)
+        
+        return response
+    
+    def _fallback_response(self, user_input=""):
+        """Фолбэк если Qwen не загрузилась"""
+        fallbacks = [
+            "ебаный рот, че за нахуй тут происходит 🤘",
+            "ну хз, кароче, я хз",
+            "бля, чет я завис, повтори",
+            "ахахах, заебись короче",
+            "пиздец, не знаю че сказать"
+        ]
+        return random.choice(fallbacks)
+
+# ========== ЦЕПЬ МАРКОВА (для фолбэка) ==========
 class MarkovChain:
     def __init__(self):
         self.chain = defaultdict(list)
         self.words = []
     
     def train(self, text):
-        """Обучаемся на тексте: разбиваем на слова и строим переходы"""
-        # Чистим текст, но сохраняем знаки препинания для стиля
         sentences = re.split(r'[.!?…]+', text)
-        
         for sentence in sentences:
             words = sentence.strip().split()
             if len(words) < 2:
                 continue
-            
             for i in range(len(words) - 1):
-                key = words[i]
-                next_word = words[i + 1]
-                self.chain[key].append(next_word)
-                self.words.append(key)
+                self.chain[words[i]].append(words[i + 1])
+                self.words.append(words[i])
     
     def train_from_file(self, filepath):
-        """Обучаемся из файла с текстами"""
         with open(filepath, 'r', encoding='utf-8') as f:
-            content = f.read()
-            self.train(content)
+            self.train(f.read())
     
-    def generate(self, seed_word=None, max_words=30):
-        """Генерируем текст в стиле HoFiLiOn"""
+    def generate(self, max_words=15):
         if not self.chain:
-            return "пока ничему не научился, дай текстов 🤷"
-        
-        # Если нет seed'а или он не в цепочке — берём случайное слово
-        if not seed_word or seed_word not in self.chain:
-            seed_word = random.choice(list(self.chain.keys()))
-        
-        result = [seed_word]
-        current = seed_word
-        
+            return "пока не обучен 🤷"
+        seed = random.choice(list(self.chain.keys()))
+        result = [seed]
+        current = seed
         for _ in range(max_words - 1):
             if current not in self.chain:
                 break
-            
-            next_words = self.chain[current]
-            if not next_words:
-                break
-            
-            next_word = random.choice(next_words)
+            next_word = random.choice(self.chain[current])
             result.append(next_word)
             current = next_word
-        
         return ' '.join(result)
 
-# ========== БАЗА СТИЛЕЙ И ЭМОЦИЙ ==========
-HOFILION_STYLE = {
-    "начало": [
-        "ну че там…", "бля, смотри", "короче", "слушай", "вообще пиздец",
-        "ахахах", "да ну нахуй", "интересно", "хз короче"
-    ],
-    "связки": [
-        "короче", "типа", "ну", "бля", "ебать", "пиздец", "ахаха", "серьезно"
-    ],
-    "концовки": [
-        "хз", "ну такое", "кароче так", "вот и всё", "а я хз", "посмотрим чё будет"
-    ],
-    "эмодзи": ["😂", "🤣", "😈", "🔥", "💀", "🤡", "👀", "😏", "🤷", "🙄"]
-}
+# ========== БАЗА СТИЛЯ ==========
+HOFILION_EMOJI = ["😂", "🤣", "😈", "🔥", "💀", "🤡", "👀", "😏", "🤷", "🙄", "😎", "🤘"]
 
-def add_hofilion_style(text):
-    """Добавляет сленг, эмоции и манеру HoFiLiOn к сгенерированному тексту"""
-    words = text.split()
+def style_response(text):
+    """Доводим ответ до стиля HoFiLiOn"""
+    if not text:
+        return "ну хз 🤷"
     
-    # Добавляем случайное начало
-    if random.random() > 0.6:
-        start = random.choice(HOFILION_STYLE["начало"])
-        text = f"{start}, {text}"
+    # Добавляем эмодзи если нет
+    if not any(emoji in text for emoji in HOFILION_EMOJI):
+        if random.random() > 0.5:
+            text = f"{text} {random.choice(HOFILION_EMOJI)}"
     
-    # Вставляем связки
-    if len(words) > 5 and random.random() > 0.7:
-        pos = random.randint(2, len(words) - 2)
-        connector = random.choice(HOFILION_STYLE["связки"])
-        words.insert(pos, connector)
-        text = ' '.join(words)
+    # Делаем нижний регистр для аутентичности (кроме эмоций)
+    text = text.lower()
     
-    # Добавляем концовку
-    if random.random() > 0.6:
-        end = random.choice(HOFILION_STYLE["концовки"])
-        text = f"{text}… {end}"
-    
-    # Добавляем эмодзи
-    if random.random() > 0.5:
-        emoji = random.choice(HOFILION_STYLE["эмодзи"])
-        text = f"{text} {emoji}"
-    
-    return text.lower()
+    return text
 
-# ========== ИНИЦИАЛИЗАЦИЯ МОДЕЛИ ==========
+# ========== ИНИЦИАЛИЗАЦИЯ ==========
+qwen = QwenChat()
 markov = MarkovChain()
 
-# Создаём файл с примерами текстов в стиле HoFiLiOn
+# Обучаем цепь Маркова на примерах
 EXAMPLE_TEXTS = """
 ебаный рот, ну и что за нахуй тут происходит
 ааа, вот оно че, бля, даже не ожидал такого
@@ -122,67 +175,59 @@ EXAMPLE_TEXTS = """
 вообще кайф, заебись всё
 ну хз, может быть, а может и нет
 бля, опять эти глюки, ебаный в рот
-типа, я вообще не понял че произошло
-пиздец, ну и денек
-короче, я пас, делайте что хотите
 """
+markov.train(EXAMPLE_TEXTS)
 
-# Сохраняем в файл и обучаем
-with open("hofilion_train.txt", "w", encoding="utf-8") as f:
-    f.write(EXAMPLE_TEXTS)
-
-markov.train_from_file("hofilion_train.txt")
-
-# ========== ОБРАБОТЧИКИ БОТА ==========
+# ========== ОБРАБОТЧИКИ ==========
 logging.basicConfig(level=logging.INFO)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("ну че, заебись, работаем 🤘")
+    await update.message.reply_text("ну че, заебись, работаю на Qwen 🤘")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message = update.message.text
     
-    # Генерируем ответ
-    if random.random() > 0.3:
-        # Используем обученную модель
-        seed = random.choice(list(markov.chain.keys()))
-        generated = markov.generate(seed_word=seed, max_words=random.randint(8, 20))
-    else:
-        # Используем готовые фразы
-        generated = random.choice(EXAMPLE_TEXTS.strip().split('\n'))
+    # Пытаемся использовать Qwen
+    try:
+        if qwen.model is None:
+            # Загружаем модель при первом сообщении
+            if not qwen.load_model():
+                # Если не загрузилась — используем цепь Маркова
+                response = markov.generate()
+            else:
+                response = qwen.generate_hofilion_style(user_message)
+        else:
+            response = qwen.generate_hofilion_style(user_message)
+    except Exception as e:
+        print(f"Ошибка Qwen: {e}")
+        response = markov.generate()
     
-    # Стилизуем под HoFiLiOn
-    response = add_hofilion_style(generated)
-    
-    # Если сообщение слишком короткое или пустое — добавляем эмоцию
-    if len(response) < 10:
-        response = f"{response} {random.choice(HOFILION_STYLE['эмодзи'])}"
+    # Стилизуем ответ
+    response = style_response(response)
     
     await update.message.reply_text(response)
 
-async def train_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда для дообучения на новых текстах"""
-    if context.args:
-        new_text = ' '.join(context.args)
-        markov.train(new_text)
-        
-        # Сохраняем в файл
-        with open("hofilion_train.txt", "a", encoding="utf-8") as f:
-            f.write(f"\n{new_text}")
-        
-        await update.message.reply_text("заебись, запомнил 👌")
-    else:
-        await update.message.reply_text("а че писать-то? дай текст, обучусь")
+async def qwen_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Принудительно используем Qwen"""
+    user_message = ' '.join(context.args) if context.args else "расскажи что-нибудь"
+    
+    if qwen.model is None:
+        if not qwen.load_model():
+            await update.message.reply_text("Qwen не загрузилась, чет пошло не так 🤷")
+            return
+    
+    response = qwen.generate_hofilion_style(user_message)
+    response = style_response(response)
+    await update.message.reply_text(response)
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Статистика модели"""
-    words_count = len(markov.words)
-    chains_count = len(markov.chain)
+    """Статус"""
+    qwen_status = "✅ загружена" if qwen.model else "❌ не загружена"
     await update.message.reply_text(
-        f"статистика:\n"
-        f"- слов в словаре: {words_count}\n"
-        f"- цепочек переходов: {chains_count}\n"
-        f"- стиль: хойлион-кор 🤘"
+        f"🤘 HoFiLiOn Bot\n"
+        f"Qwen: {qwen_status}\n"
+        f"Цепь Маркова: {len(markov.chain)} цепочек\n"
+        f"Работает на {qwen.device if qwen.model else 'cpu'}"
     )
 
 # ========== ЗАПУСК ==========
@@ -190,11 +235,11 @@ def main():
     app = Application.builder().token(TOKEN).build()
     
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("train", train_command))
+    app.add_handler(CommandHandler("qwen", qwen_command))
     app.add_handler(CommandHandler("stats", stats_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    print("бот на хуях работает 🤘")
+    print("🤘 HoFiLiOn Bot запущен на Qwen!")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
