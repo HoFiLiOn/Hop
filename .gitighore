@@ -1,0 +1,5 @@
+sessions_real/
+*.session
+__pycache__/
+*.pyc
+config.py
