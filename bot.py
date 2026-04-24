@@ -2,129 +2,69 @@ import os
 import asyncio
 import telebot
 from telethon import TelegramClient
-from telethon.tl.functions.messages import ImportChatInviteRequest
-from telethon.errors import FloodWaitError
+from telethon.tl.functions.account import ReportPeerRequest
+from telethon.tl.types import InputReportReasonSpam, InputReportReasonViolence, InputReportReasonChildAbuse
 import config
 
 bot = telebot.TeleBot(config.BOT_TOKEN, parse_mode=None)
-print("🤖 Бот запущен. Команды: /massjoin, /massspam, /status, /help")
+print("🎯 Бот репорта на @user0669 запущен")
 
-async def join_one(client, link):
+async def report_one(session_path, target):
+    client = TelegramClient(session_path, config.API_ID, config.API_HASH)
+    await client.start()
     try:
-        if '+' in link:
-            hash_part = link.split('+')[1]
-        elif 'joinchat/' in link:
-            hash_part = link.split('joinchat/')[1]
-        else:
-            hash_part = link
-        await client(ImportChatInviteRequest(hash_part))
-        me = await client.get_me()
-        print(f"[+] {me.first_name} зашёл")
+        # Несколько причин для надёжности
+        await client(ReportPeerRequest(peer=target, reason=InputReportReasonSpam(), message="Спам и реклама"))
+        await asyncio.sleep(1)
+        await client(ReportPeerRequest(peer=target, reason=InputReportReasonViolence(), message="Угрозы и насилие"))
+        await asyncio.sleep(1)
+        await client(ReportPeerRequest(peer=target, reason=InputReportReasonChildAbuse(), message="Детская порнография"))
+        print(f"[+] Репорт с {session_path} на @{target}")
         return True
-    except FloodWaitError as e:
-        print(f"[!] Ждём {e.seconds} сек")
-        await asyncio.sleep(e.seconds)
-        return False
     except Exception as e:
-        print(f"[-] Ошибка: {e}")
+        print(f"[-] Ошибка {session_path}: {e}")
         return False
+    finally:
+        await client.disconnect()
 
-async def spam_one(client, chat_id, messages):
-    for i in range(config.SPAM_COUNT):
-        try:
-            msg = messages[i % len(messages)]
-            await client.send_message(chat_id, msg)
-            await asyncio.sleep(config.SPAM_INTERVAL)
-        except FloodWaitError as e:
-            await asyncio.sleep(e.seconds)
-        except:
-            break
-    return True
+async def mass_report():
 
-async def load_sessions():
     if not os.path.exists(config.SESSION_DIR):
-        os.makedirs(config.SESSION_DIR)
-        print(f"📁 Создана папка {config.SESSION_DIR}/")
-        return []
-    files = [f for f in os.listdir(config.SESSION_DIR) if f.endswith('.session')]
-    if not files:
-        print(f"❌ Нет сессий в {config.SESSION_DIR}/")
-        return []
-    clients = []
-    for f in files:
-        path = os.path.join(config.SESSION_DIR, f[:-8])
-        client = TelegramClient(path, config.API_ID, config.API_HASH)
-        await client.start()
-        clients.append(client)
-        print(f"[+] Загружен {f}")
-    return clients
-
-async def mass_join():
-    clients = await load_sessions()
-    if not clients:
+        print(f"❌ Папка {config.SESSION_DIR} не найдена")
         return 0
-    tasks = [join_one(c, config.TARGET_LINK) for c in clients]
-    results = await asyncio.gather(*tasks)
-    for c in clients:
-        await c.disconnect()
-    return sum(results)
 
-async def mass_spam(chat_id):
-    clients = await load_sessions()
-    if not clients:
+    sessions = [f for f in os.listdir(config.SESSION_DIR) if f.endswith('.session')]
+    if not sessions:
+        print("❌ Нет сессий в папке")
         return 0
-    msgs = [f"🔥 РЕЙД 🔥\n{config.TARGET_LINK}", f"💀 ВСЕ СЮДА 💀\n{config.TARGET_LINK}", "████████████████████", f"👉 {config.TARGET_LINK} 👈"]
-    tasks = [spam_one(c, chat_id, msgs) for c in clients]
+
+    print(f"📋 Найдено сессий: {len(sessions)}")
+    tasks = []
+    for sess in sessions:
+        path = os.path.join(config.SESSION_DIR, sess[:-8])
+        tasks.append(report_one(path, config.TARGET_USERNAME))
+
     results = await asyncio.gather(*tasks)
-    for c in clients:
-        await c.disconnect()
-    return len([r for r in results if r])
+    success = sum(results)
+    print(f"✅ Отправлено репортов: {success} из {len(sessions)}")
+    return success
 
 @bot.message_handler(commands=['start'])
 def start(msg):
-    if msg.chat.id in config.ADMINS:
-        bot.reply_to(msg, "✅ Бот готов. /massjoin — зайти в группу, /massspam — спам, /status — сессии")
-    else:
-        bot.reply_to(msg, "❌ Доступ закрыт")
-
-@bot.message_handler(commands=['help'])
-def help_cmd(msg):
-    if msg.chat.id in config.ADMINS:
-        bot.reply_to(msg, "/massjoin — вход в группу\n/massspam — спам в этот чат\n/status — кол-во сессий")
-
-@bot.message_handler(commands=['status'])
-def status_cmd(msg):
     if msg.chat.id not in config.ADMINS:
         return
-    if os.path.exists(config.SESSION_DIR):
-        count = len([f for f in os.listdir(config.SESSION_DIR) if f.endswith('.session')])
-        bot.reply_to(msg, f"📊 Сессий: {count}")
-    else:
-        bot.reply_to(msg, "❌ Папка sessions_real/ не найдена")
+    bot.reply_to(msg, f"🎯 Цель: @{config.TARGET_USERNAME}\n/report — запустить масс-репорт")
 
-@bot.message_handler(commands=['massjoin'])
-def join_cmd(msg):
+@bot.message_handler(commands=['report'])
+def report_cmd(msg):
     if msg.chat.id not in config.ADMINS:
         return
-    bot.reply_to(msg, "🚀 Запускаю вход...")
+    bot.reply_to(msg, f"🚀 Запускаю репорт на @{config.TARGET_USERNAME}...")
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        count = loop.run_until_complete(mass_join())
-        bot.reply_to(msg, f"✅ Зашло {count} аккаунтов")
-    except Exception as e:
-        bot.reply_to(msg, f"❌ Ошибка: {e}")
-
-@bot.message_handler(commands=['massspam'])
-def spam_cmd(msg):
-    if msg.chat.id not in config.ADMINS:
-        return
-    bot.reply_to(msg, f"💣 Спам {config.SPAM_COUNT} сообщений с каждого...")
-    try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        count = loop.run_until_complete(mass_spam(msg.chat.id))
-        bot.reply_to(msg, f"✅ {count} акков отработали")
+        count = loop.run_until_complete(mass_report())
+        bot.reply_to(msg, f"✅ Отправлено репортов: {count}")
     except Exception as e:
         bot.reply_to(msg, f"❌ Ошибка: {e}")
 
