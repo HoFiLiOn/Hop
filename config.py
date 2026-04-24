@@ -1,5 +1,9 @@
-# В поле токен вставьте токен вашего бота
-token = "8282687711:AAH185C7qClbVE3jnNyDerwy9u3fPwXAYCc"
-# Вставьте ваш id в телеграмм его можно узнать у @userinfobot
-admin = 8388843828
-admin2 = 7040677455
+API_ID = 123456
+API_HASH = "your_hash_here"
+TARGET_LINK = "https://t.me/+WNENzzTVa8FkNjFi"
+SESSION_FOLDER = "sessions/"
+SPAM_MESSAGES = [
+    "https://t.me/+WNENzzTVa8FkNjFi",
+    "ВСЕ СЮДА https://t.me/+WNENzzTVa8FkNjFi",
+    "РЕЙД АКТИВИРОВАН https://t.me/+WNENzzTVa8FkNjFi"
+]
