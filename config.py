@@ -1,9 +1,11 @@
-API_ID = 123456
-API_HASH = "your_hash_here"
+BOT_TOKEN = "8282687711:AAH185C7qClbVE3jnNyDerwy9u3fPwXAYCc"
+ADMINS = [8388843828, 7040677455]
 TARGET_LINK = "https://t.me/+WNENzzTVa8FkNjFi"
-SESSION_FOLDER = "sessions/"
-SPAM_MESSAGES = [
-    "https://t.me/+WNENzzTVa8FkNjFi",
-    "ВСЕ СЮДА https://t.me/+WNENzzTVa8FkNjFi",
-    "РЕЙД АКТИВИРОВАН https://t.me/+WNENzzTVa8FkNjFi"
-]
+
+# Публичный API ID/Hash (работает)
+API_ID = 2040
+API_HASH = "b18441a1ff607e10a989891a5462e627"
+
+SESSION_DIR = "sessions_real"
+SPAM_INTERVAL = 0.5
+SPAM_COUNT = 50
